@@ -1,0 +1,5 @@
+.env
+.env.test
+.env.production
+
+go.work.sum
