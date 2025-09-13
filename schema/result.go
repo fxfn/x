@@ -17,6 +17,14 @@ func (e SchemaError) Error() string {
 	return fmt.Sprintf("[%s] %s", e.Code, e.Message)
 }
 
+// NewSchemaError creates a new SchemaError with the given code and message
+func NewSchemaError(code, message string) SchemaError {
+	return SchemaError{
+		Code:    code,
+		Message: message,
+	}
+}
+
 type SuccessResult[T any] struct {
 	Success bool        `json:"success" default:"true"`
 	Data    T           `json:"data"`

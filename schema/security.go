@@ -220,7 +220,7 @@ func (b *BearerSecurity) Middleware() gin.HandlerFunc {
 		}
 
 		// Check for Bearer prefix
-		if len(authHeader) < 7 || !strings.HasPrefix(authHeader, "Bearer ") {
+		if len(authHeader) < 7 || !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
 			c.JSON(401, ErrorResult{
 				Success: false,
 				ErrorInfo: Error{

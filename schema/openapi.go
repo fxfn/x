@@ -340,6 +340,16 @@ func generateOperation(info HandlerInfo, schemas map[string]*JSONSchema, securit
 func extractParameters(schemaType reflect.Type, schemas map[string]*JSONSchema) []Parameter {
 	var parameters []Parameter
 
+	// Handle pointers
+	if schemaType.Kind() == reflect.Ptr {
+		schemaType = schemaType.Elem()
+	}
+
+	// Ensure we have a struct type before calling NumField
+	if schemaType.Kind() != reflect.Struct {
+		return parameters
+	}
+
 	// Walk through the schema struct fields
 	for i := 0; i < schemaType.NumField(); i++ {
 		field := schemaType.Field(i)
@@ -354,6 +364,42 @@ func extractParameters(schemaType reflect.Type, schemas map[string]*JSONSchema) 
 			// Extract query parameters
 			queryParams := extractQueryParameters(field.Type, schemas)
 			parameters = append(parameters, queryParams...)
+		default:
+			// Check if this field has query tags - treat it as a query parameter
+			if queryTag := getTagValue(field, "query"); queryTag != "" {
+				paramName := queryTag
+
+				jsonSchema := generateJSONSchemaFromType(field.Type, schemas)
+
+				// Check if parameter has a default value
+				if defaultVal := getTagValue(field, "default"); defaultVal != "" {
+					jsonSchema.Default = parseDefaultValue(defaultVal, field.Type)
+				}
+
+				parameters = append(parameters, Parameter{
+					Name:     paramName,
+					In:       "query",
+					Required: isRequired(field),
+					Schema:   jsonSchema,
+				})
+			} else if isQueryParameter(field) {
+				// Auto-detect query parameters based on field characteristics
+				paramName := getQueryParameterName(field)
+
+				jsonSchema := generateJSONSchemaFromType(field.Type, schemas)
+
+				// Check if parameter has a default value
+				if defaultVal := getTagValue(field, "default"); defaultVal != "" {
+					jsonSchema.Default = parseDefaultValue(defaultVal, field.Type)
+				}
+
+				parameters = append(parameters, Parameter{
+					Name:     paramName,
+					In:       "query",
+					Required: isRequired(field),
+					Schema:   jsonSchema,
+				})
+			}
 		}
 	}
 
@@ -362,6 +408,16 @@ func extractParameters(schemaType reflect.Type, schemas map[string]*JSONSchema) 
 
 func extractPathParameters(paramType reflect.Type, schemas map[string]*JSONSchema) []Parameter {
 	var parameters []Parameter
+
+	// Handle pointers
+	if paramType.Kind() == reflect.Ptr {
+		paramType = paramType.Elem()
+	}
+
+	// Ensure we have a struct type before calling NumField
+	if paramType.Kind() != reflect.Struct {
+		return parameters
+	}
 
 	for i := 0; i < paramType.NumField(); i++ {
 		field := paramType.Field(i)
@@ -386,6 +442,16 @@ func extractPathParameters(paramType reflect.Type, schemas map[string]*JSONSchem
 
 func extractQueryParameters(queryType reflect.Type, schemas map[string]*JSONSchema) []Parameter {
 	var parameters []Parameter
+
+	// Handle pointers
+	if queryType.Kind() == reflect.Ptr {
+		queryType = queryType.Elem()
+	}
+
+	// Ensure we have a struct type before calling NumField
+	if queryType.Kind() != reflect.Struct {
+		return parameters
+	}
 
 	for i := 0; i < queryType.NumField(); i++ {
 		field := queryType.Field(i)
@@ -414,6 +480,16 @@ func extractQueryParameters(queryType reflect.Type, schemas map[string]*JSONSche
 }
 
 func extractRequestBody(schemaType reflect.Type, schemas map[string]*JSONSchema) *RequestBody {
+	// Handle pointers
+	if schemaType.Kind() == reflect.Ptr {
+		schemaType = schemaType.Elem()
+	}
+
+	// Ensure we have a struct type before calling NumField
+	if schemaType.Kind() != reflect.Struct {
+		return nil
+	}
+
 	// Look for a "Body" field in the schema
 	for i := 0; i < schemaType.NumField(); i++ {
 		field := schemaType.Field(i)
@@ -508,6 +584,10 @@ func generateErrorResponse(schemas map[string]*JSONSchema) Response {
 }
 
 func generateJSONSchemaFromType(t reflect.Type, schemas map[string]*JSONSchema) *JSONSchema {
+	return generateJSONSchemaFromTypeWithContext(t, schemas, "")
+}
+
+func generateJSONSchemaFromTypeWithContext(t reflect.Type, schemas map[string]*JSONSchema, contextName string) *JSONSchema {
 	// Handle pointers
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -528,10 +608,10 @@ func generateJSONSchemaFromType(t reflect.Type, schemas map[string]*JSONSchema) 
 		return newJSONSchema("boolean", nil)
 	case reflect.Slice, reflect.Array:
 		schema := newJSONSchema("array", nil)
-		schema.Items = generateJSONSchemaFromType(t.Elem(), schemas)
+		schema.Items = generateJSONSchemaFromTypeWithContext(t.Elem(), schemas, contextName+"Item")
 		return schema
 	case reflect.Struct:
-		return generateStructSchema(t, schemas)
+		return generateStructSchemaWithContext(t, schemas, contextName)
 	default:
 		return newJSONSchema("object", nil)
 	}
@@ -549,10 +629,29 @@ func newJSONSchema(schemaType string, properties map[string]*JSONSchema) *JSONSc
 }
 
 func generateStructSchema(t reflect.Type, schemas map[string]*JSONSchema) *JSONSchema {
+	return generateStructSchemaWithContext(t, schemas, "")
+}
+
+func generateStructSchemaWithContext(t reflect.Type, schemas map[string]*JSONSchema, contextName string) *JSONSchema {
+	// Handle pointers
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	// Ensure we have a struct type before calling NumField
+	if t.Kind() != reflect.Struct {
+		return newJSONSchema("object", nil)
+	}
+
 	// Create a reference name for the schema
 	schemaName := t.Name()
 	if schemaName == "" {
-		schemaName = "AnonymousStruct"
+		if contextName != "" {
+			// Use context name for anonymous structs
+			schemaName = contextName
+		} else {
+			schemaName = "AnonymousStruct"
+		}
 	}
 
 	// Check if we already have this schema
@@ -578,8 +677,19 @@ func generateStructSchema(t reflect.Type, schemas map[string]*JSONSchema) *JSONS
 			continue
 		}
 
-		// Generate schema for field
-		fieldSchema := generateJSONSchemaFromType(field.Type, schemas)
+		// Generate schema for field with context for anonymous structs
+		fieldContextName := ""
+		if field.Type.Kind() == reflect.Struct && field.Type.Name() == "" {
+			// For anonymous structs, create a name based on the parent schema and field name
+			parentName := schemaName
+			if parentName == "AnonymousStruct" {
+				parentName = contextName
+			}
+			// Capitalize the first letter of the field name for proper schema naming
+			capitalizedJsonName := strings.ToUpper(jsonName[:1]) + jsonName[1:]
+			fieldContextName = parentName + capitalizedJsonName
+		}
+		fieldSchema := generateJSONSchemaFromTypeWithContext(field.Type, schemas, fieldContextName)
 
 		// Add validation constraints from tags
 		addValidationConstraints(fieldSchema, field)
@@ -714,6 +824,62 @@ func floatPtr(f float64) *float64 {
 
 func intPtr(i int) *int {
 	return &i
+}
+
+// isQueryParameter determines if a field should be treated as a query parameter
+func isQueryParameter(field reflect.StructField) bool {
+	// Skip if it's a nested struct (these should be handled as body or explicit Query/Params fields)
+	if field.Type.Kind() == reflect.Struct || (field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Struct) {
+		return false
+	}
+
+	// Skip if it's a slice of structs (these should be in body)
+	if field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.Struct {
+		return false
+	}
+
+	// Check if field type is suitable for query parameters (primitives, strings, slices of primitives)
+	switch field.Type.Kind() {
+	case reflect.String, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64, reflect.Bool:
+		return true
+	case reflect.Slice, reflect.Array:
+		elemType := field.Type.Elem()
+		switch elemType.Kind() {
+		case reflect.String, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Float32, reflect.Float64, reflect.Bool:
+			return true
+		}
+	case reflect.Ptr:
+		// Handle pointer to primitive types
+		elemType := field.Type.Elem()
+		switch elemType.Kind() {
+		case reflect.String, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Float32, reflect.Float64, reflect.Bool:
+			return true
+		}
+	}
+
+	return false
+}
+
+// getQueryParameterName extracts the query parameter name from field tags or field name
+func getQueryParameterName(field reflect.StructField) string {
+	// First check for explicit query tag
+	if queryName := getTagValue(field, "query"); queryName != "" {
+		return queryName
+	}
+
+	// Then check json tag
+	if jsonName := getJSONFieldName(field); jsonName != "" && jsonName != "-" {
+		return jsonName
+	}
+
+	// Fall back to lowercase field name
+	return strings.ToLower(field.Name)
 }
 
 // convertGinPathToOpenAPI converts Gin path format (:param) to OpenAPI format ({param})

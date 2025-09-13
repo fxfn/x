@@ -92,7 +92,8 @@ func ValidateAndHandle[T Schema, R any](handler HandlerFunc[T, R]) TypedHandlerF
 		// Parse and validate the schema
 		if err := parseSchema(c, &schema); err != nil {
 			errorResult := convertToErrorResult(err)
-			c.JSON(400, errorResult)
+			wrappedError := globalWrapper.WrapError(errorResult.ErrorInfo.Code, errorResult.ErrorInfo.Message)
+			c.JSON(400, wrappedError)
 			return
 		}
 
@@ -101,26 +102,28 @@ func ValidateAndHandle[T Schema, R any](handler HandlerFunc[T, R]) TypedHandlerF
 		if err != nil {
 			// Check if the error is actually an ErrorResult (user wants direct control)
 			if errorResult, ok := err.(ErrorResult); ok {
-				c.JSON(400, errorResult)
+				wrappedError := globalWrapper.WrapError(errorResult.ErrorInfo.Code, errorResult.ErrorInfo.Message)
+				c.JSON(400, wrappedError)
 				return
 			}
 
 			// Otherwise convert the error to an ErrorResult
 			errorResult := convertToErrorResult(err)
-			c.JSON(400, errorResult)
+			wrappedError := globalWrapper.WrapError(errorResult.ErrorInfo.Code, errorResult.ErrorInfo.Message)
+			c.JSON(400, wrappedError)
 			return
 		}
 
 		// Check if result is nil (shouldn't happen with proper error handling)
 		if result == nil {
-			errorResult := NotOk("ERR_INTERNAL", "Handler returned nil result without error")
-			c.JSON(500, errorResult)
+			wrappedError := globalWrapper.WrapError("ERR_INTERNAL", "Handler returned nil result without error")
+			c.JSON(500, wrappedError)
 			return
 		}
 
-		// Wrap the result in a success response (dereference the pointer)
-		successResult := Ok(*result)
-		c.JSON(200, successResult)
+		// Wrap the result using the configured wrapper (dereference the pointer)
+		wrappedResult := globalWrapper.WrapSuccess(*result)
+		c.JSON(200, wrappedResult)
 	}
 
 	return TypedHandlerFunc{
