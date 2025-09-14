@@ -18,17 +18,14 @@ type IntrospectOpts struct {
 }
 
 type IntrospectResponse struct {
-	Active    bool   `json:"active"`
-	Scope     string `json:"scope"`
-	ClientId  string `json:"client_id"`
-	Username  string `json:"username"`
-	TokenType string `json:"token_type"`
-	ExpiresIn int64  `json:"expires_in"`
-	IssuedAt  string `json:"issued_at"`
-	ExpiredAt string `json:"expired_at"`
+	Active bool `json:"active"`
 }
 
 func (a *Auth) Introspect(opts IntrospectOpts) (*IntrospectResponse, error) {
+	return IntrospectGeneric[IntrospectResponse](a, opts)
+}
+
+func IntrospectGeneric[T any](a *Auth, opts IntrospectOpts) (*T, error) {
 
 	if a.server == nil {
 		return nil, errors.New("no server set")
@@ -66,7 +63,7 @@ func (a *Auth) Introspect(opts IntrospectOpts) (*IntrospectResponse, error) {
 		return nil, err
 	}
 
-	var introspectResponse IntrospectResponse
+	var introspectResponse T
 	json.Unmarshal(body, &introspectResponse)
 
 	return &introspectResponse, nil
