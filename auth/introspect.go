@@ -18,7 +18,18 @@ type IntrospectOpts struct {
 }
 
 type IntrospectResponse struct {
-	Active bool `json:"active"`
+	Active    bool   `json:"active"`
+	ClientID  string `json:"client_id"`
+	Username  string `json:"username"`
+	Scope     string `json:"scope"`
+	Subject   string `json:"sub"`
+	Audience  string `json:"aud"`
+	Issuer    string `json:"iss"`
+	ExpiresAt int    `json:"exp"`
+	IssuedAt  int    `json:"iat"`
+	TokenType string `json:"token_type"`
+	NotBefore int    `json:"nbf"`
+	TokenID   string `json:"jti"`
 }
 
 func (a *Auth) Introspect(opts IntrospectOpts) (*IntrospectResponse, error) {
